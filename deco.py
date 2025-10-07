@@ -328,9 +328,16 @@ class MultiAIExtractor:
         # Uso 'temp_processing' anziché '/content/temp_processing' per maggiore robustezza
         self.temp_dir = Path(f"temp_processing_{self.job_id}")
         self.temp_dir.mkdir(exist_ok=True)
-        # Uso 'multi_ai_product_images' come directory locale
-        self.product_images_dir = Path("multi_ai_product_images")
-        self.product_images_dir.mkdir(exist_ok=True)
+        # Directory immagini: supporta variabili d'ambiente e Persistent Disk su Render
+        disk_path = os.getenv("DISK_PATH") or os.getenv("PERSISTENT_DISK_PATH")
+        images_dir_env = os.getenv("IMAGES_DIR")
+        if images_dir_env:
+            self.product_images_dir = Path(images_dir_env)
+        elif disk_path:
+            self.product_images_dir = Path(disk_path) / "multi_ai_product_images"
+        else:
+            self.product_images_dir = Path("multi_ai_product_images")
+        self.product_images_dir.mkdir(parents=True, exist_ok=True)
 
         self.card_generator = ProductCardGenerator()
         self.supermercato_nome = supermercato_nome
@@ -704,7 +711,10 @@ GeminiOnlyExtractor = MultiAIExtractor
 app = FastAPI(title="Deco Volantino Extractor API", version="1.0.0")
 
 RESULTS_PATTERN = "gemini_results_*.json"
-IMAGES_DIR = "multi_ai_product_images"
+IMAGES_DIR_ENV = os.getenv("IMAGES_DIR")
+DISK_PATH_ENV = os.getenv("DISK_PATH") or os.getenv("PERSISTENT_DISK_PATH")
+IMAGES_DIR = IMAGES_DIR_ENV or (os.path.join(DISK_PATH_ENV, "multi_ai_product_images") if DISK_PATH_ENV else "multi_ai_product_images")
+os.makedirs(IMAGES_DIR, exist_ok=True)
 
 # Espone cartella immagini come static files (utile per card generate)
 app.mount("/images", StaticFiles(directory=IMAGES_DIR), name="images")
