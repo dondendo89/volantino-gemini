@@ -31,6 +31,10 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 import uvicorn
+import glob
+from fastapi.staticfiles import StaticFiles
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Text
+from sqlalchemy.orm import sessionmaker, declarative_base
 
 # Configurazione logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -51,6 +55,24 @@ if GEMINI_API_KEY_2:
     print("✅ GEMINI_API_KEY_2 configurata e pronta per il bilanciamento del carico.")
 else:
     logger.info("ℹ️ GEMINI_API_KEY_2 non trovata. Verrà usata solo la chiave primaria.")
+
+# Configurazione Database PostgreSQL (opzionale)
+DATABASE_URL = os.getenv("DATABASE_URL")
+SessionLocal = None
+Base = None
+DB_ENABLED = False
+engine = None
+if DATABASE_URL:
+    try:
+        # Esempio: postgresql+psycopg2://user:password@host:port/dbname
+        engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+        SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+        Base = declarative_base()
+        DB_ENABLED = True
+        print("✅ Database PostgreSQL configurato.")
+    except Exception as e:
+        logger.error(f"❌ Errore configurazione DB: {e}")
+        DB_ENABLED = False
 
 # ==============================================================================
 # 3. CLASSI DI SIMULAZIONE E VARIABILI DI FALLBACK
@@ -101,6 +123,100 @@ class DBManagerSimulator:
     def update_job_status(self, job_id, status, progress, total_products, message):
         print(f"📊 Simulazione Aggiornamento Job {job_id}: Stato={status}, Progresso={progress}%, Prodotti={total_products}")
         return True
+
+# Modello SQLAlchemy (se DB attivo)
+if DB_ENABLED and Base is not None:
+    class Product(Base):
+        __tablename__ = "products"
+        id = Column(Integer, primary_key=True, index=True)
+        job_id = Column(String(64), index=True)
+        nome = Column(Text)
+        marca = Column(Text)
+        categoria = Column(Text, index=True)
+        prezzo = Column(String(32))
+        prezzo_float = Column(Float, index=True)
+        descrizione = Column(Text)
+        pagina = Column(Integer)
+        supermercato = Column(Text, index=True)
+        immagine_prodotto_card = Column(Text)
+        volantino_url = Column(Text)
+        volantino_name = Column(Text)
+        volantino_validita = Column(Text)
+        created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+    try:
+        Base.metadata.create_all(bind=engine)
+        print("✅ Tabelle DB create/verificate.")
+    except Exception as e:
+        logger.error(f"❌ Errore creazione tabelle: {e}")
+
+class DBManagerSQLAlchemy:
+    """DB Manager basato su SQLAlchemy."""
+    def __init__(self, SessionLocal):
+        self.SessionLocal = SessionLocal
+
+    @staticmethod
+    def _convert_price_to_float(price_str_or_float):
+        if isinstance(price_str_or_float, (int, float)):
+            cleaned_price = str(price_str_or_float)
+        elif price_str_or_float is None:
+            return 0.0
+        else:
+            cleaned_price = str(price_str_or_float).strip()
+        if cleaned_price.lower() in ['non visibile', 'gratis', 'gratuito', '']:
+            return 0.0
+        cleaned_price = cleaned_price.replace('€','').replace('$','').replace(',','.').strip()
+        try:
+            m = re.search(r'(\d+\.\d{2}|\d+\.\d{1}|\d+)', cleaned_price)
+            if m:
+                return float(m.group(1))
+            return 0.0
+        except ValueError:
+            return 0.0
+
+    def save_products(self, job_id, products_list):
+        if not DB_ENABLED or SessionLocal is None or Base is None:
+            return products_list
+        session = self.SessionLocal()
+        saved = []
+        try:
+            for p in products_list:
+                obj = Product(
+                    job_id=job_id,
+                    nome=p.get("nome"),
+                    marca=p.get("marca"),
+                    categoria=p.get("categoria"),
+                    prezzo=p.get("prezzo"),
+                    prezzo_float=self._convert_price_to_float(p.get("prezzo")),
+                    descrizione=p.get("descrizione"),
+                    pagina=p.get("pagina"),
+                    supermercato=p.get("supermercato"),
+                    immagine_prodotto_card=p.get("immagine_prodotto_card"),
+                    volantino_url=p.get("volantino_url"),
+                    volantino_name=p.get("volantino_name"),
+                    volantino_validita=p.get("volantino_validita"),
+                )
+                session.add(obj)
+                session.flush()
+                p["db_id"] = obj.id
+                saved.append(p)
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            logger.error(f"❌ Errore salvataggio prodotti nel DB: {e}")
+        finally:
+            session.close()
+        return saved
+
+    def update_job_status(self, job_id, status, progress, total_products, message):
+        # Puoi persistere lo stato dei job in una tabella dedicata se necessario
+        print(f"📊 Job {job_id}: Stato={status}, Progresso={progress}%, Prodotti={total_products} - {message}")
+        return True
+
+def get_db_manager():
+    if DB_ENABLED and SessionLocal is not None:
+        return DBManagerSQLAlchemy(SessionLocal)
+    return DBManagerSimulator()
 
 # ------------------------------------------------------------------------------
 # NUOVA SEZIONE: SCRAPER PER VOLANTINI DECO
@@ -587,6 +703,12 @@ GeminiOnlyExtractor = MultiAIExtractor
 # ==============================================================================
 app = FastAPI(title="Deco Volantino Extractor API", version="1.0.0")
 
+RESULTS_PATTERN = "gemini_results_*.json"
+IMAGES_DIR = "multi_ai_product_images"
+
+# Espone cartella immagini come static files (utile per card generate)
+app.mount("/images", StaticFiles(directory=IMAGES_DIR), name="images")
+
 class ExtractRequest(BaseModel):
     url: str
     supermercato_nome: Optional[str] = "Supermercati Deco Arena"
@@ -601,20 +723,138 @@ def get_flyers():
     flyers = scraper.scrape_flyers()
     return {"count": len(flyers), "flyers": flyers}
 
+# Elenco dei risultati disponibili
+@app.get("/results/list")
+def list_results():
+    files = sorted(glob.glob(RESULTS_PATTERN))
+    results = []
+    for fp in files:
+        try:
+            job_id = os.path.basename(fp).replace("gemini_results_", "").replace(".json", "")
+            mtime = os.path.getmtime(fp)
+            size = os.path.getsize(fp)
+            results.append({
+                "file": os.path.basename(fp),
+                "job_id": job_id,
+                "modified": mtime,
+                "size": size
+            })
+        except Exception:
+            continue
+    return {"count": len(results), "results": results}
+
+# Restituisce l'ultimo risultato (per data di modifica)
+@app.get("/results/latest")
+def get_latest_result():
+    files = glob.glob(RESULTS_PATTERN)
+    if not files:
+        raise HTTPException(status_code=404, detail="Nessun risultato disponibile.")
+    latest = max(files, key=lambda f: os.path.getmtime(f))
+    try:
+        with open(latest, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Errore lettura risultato: {str(e)}")
+
+# Restituisce il risultato per job_id specifico
+@app.get("/results/{job_id}")
+def get_result_by_job(job_id: str):
+    fp = f"gemini_results_{job_id}.json"
+    if not os.path.exists(fp):
+        raise HTTPException(status_code=404, detail=f"Risultato non trovato per job_id {job_id}.")
+    try:
+        with open(fp, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Errore lettura risultato: {str(e)}")
+
+@app.get("/products")
+def list_products(page: int = 1, page_size: int = 20, marca: Optional[str] = None, categoria: Optional[str] = None, supermarket: Optional[str] = None, job_id: Optional[str] = None, q: Optional[str] = None, price_min: Optional[float] = None, price_max: Optional[float] = None):
+    if DB_ENABLED and SessionLocal is not None:
+        session = SessionLocal()
+        try:
+            query = session.query(Product)
+            if marca:
+                query = query.filter(Product.marca.ilike(f"%{marca}%"))
+            if categoria:
+                query = query.filter(Product.categoria.ilike(f"%{categoria}%"))
+            if supermarket:
+                query = query.filter(Product.supermercato.ilike(f"%{supermarket}%"))
+            if job_id:
+                query = query.filter(Product.job_id == job_id)
+            if q:
+                query = query.filter(Product.nome.ilike(f"%{q}%"))
+            if price_min is not None:
+                query = query.filter(Product.prezzo_float >= price_min)
+            if price_max is not None:
+                query = query.filter(Product.prezzo_float <= price_max)
+            total = query.count()
+            items = query.order_by(Product.created_at.desc()).offset((page-1)*page_size).limit(page_size).all()
+            products = []
+            for p in items:
+                products.append({
+                    "db_id": p.id,
+                    "job_id": p.job_id,
+                    "nome": p.nome,
+                    "marca": p.marca,
+                    "categoria": p.categoria,
+                    "prezzo": p.prezzo,
+                    "prezzo_float": p.prezzo_float,
+                    "descrizione": p.descrizione,
+                    "pagina": p.pagina,
+                    "supermercato": p.supermercato,
+                    "immagine_prodotto_card": p.immagine_prodotto_card,
+                    "volantino_url": p.volantino_url,
+                    "volantino_name": p.volantino_name,
+                    "volantino_validita": p.volantino_validita,
+                    "created_at": p.created_at.isoformat() if p.created_at else None
+                })
+            return {"page": page, "page_size": page_size, "total": total, "products": products}
+        finally:
+            session.close()
+    else:
+        files = glob.glob(RESULTS_PATTERN)
+        if not files:
+            return {"page": 1, "page_size": 0, "total": 0, "products": []}
+        latest = max(files, key=lambda f: os.path.getmtime(f))
+        with open(latest, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        products = data.get("products", [])
+        def match(p):
+            if marca and marca.lower() not in (p.get("marca","") or "").lower(): return False
+            if categoria and categoria.lower() not in (p.get("categoria","") or "").lower(): return False
+            if supermarket and supermarket.lower() not in (p.get("supermercato","") or "").lower(): return False
+            if job_id and job_id != p.get("job_id"): return False
+            if q and q.lower() not in (p.get("nome","") or "").lower(): return False
+            prf = DBManagerSQLAlchemy._convert_price_to_float(p.get("prezzo")) if hasattr(DBManagerSQLAlchemy, "_convert_price_to_float") else 0.0
+            if price_min is not None and prf < price_min: return False
+            if price_max is not None and prf > price_max: return False
+            return True
+        filtered = [p for p in products if match(p)]
+        total = len(filtered)
+        start = (page-1)*page_size
+        end = start + page_size
+        return {"page": page, "page_size": page_size, "total": total, "products": filtered[start:end]}
+
+@app.get("/products/latest")
+def products_latest(page_size: int = 20):
+    return list_products(page=1, page_size=page_size)
+
 @app.post("/extract")
 def extract(req: ExtractRequest):
     if not os.getenv('GEMINI_API_KEY'):
         raise HTTPException(status_code=500, detail="GEMINI_API_KEY non impostata nel server.")
-    db_sim = DBManagerSimulator()
+    db_mgr = get_db_manager()
     extractor = MultiAIExtractor(
         gemini_api_key=os.getenv('GEMINI_API_KEY'),
         gemini_api_key_2=os.getenv('GEMINI_API_KEY_2'),
         job_id=str(int(time.time())),
-        db_manager=db_sim,
+        db_manager=db_mgr,
         supermercato_nome=req.supermercato_nome
     )
     results = extractor.run(pdf_source=req.url, source_type="url")
-    # Arricchisce i prodotti con l'URL del volantino
     for product in results:
         product['volantino_url'] = req.url
     return {"job_id": extractor.job_id, "total_products": len(results), "products": results}
@@ -630,12 +870,12 @@ def extract_all(limit: Optional[int] = None, supermercato_nome: Optional[str] = 
 
     all_results = []
     for i, flyer in enumerate(flyers):
-        db_sim = DBManagerSimulator()
+        db_mgr = get_db_manager()
         extractor = MultiAIExtractor(
             gemini_api_key=os.getenv('GEMINI_API_KEY'),
             gemini_api_key_2=os.getenv('GEMINI_API_KEY_2'),
             job_id=f"service_{int(time.time())}_{i+1}",
-            db_manager=db_sim,
+            db_manager=db_mgr,
             supermercato_nome=supermercato_nome
         )
         extracted_products = extractor.run(pdf_source=flyer['url'], source_type="url")

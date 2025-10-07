@@ -1,0 +1,213 @@
+{
+  "info": {
+    "name": "Deco Volantino Extractor API",
+    "_postman_id": "e4f1a7d4-1234-4aa8-9b1c-collection",
+    "description": "Postman collection for Deco Volantino API: health, flyers, results, products (filters/pagination), and extraction endpoints.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Health",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/health",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "health"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Flyers list",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/flyers",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "flyers"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Results list",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/results/list",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "results",
+            "list"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Latest result",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/results/latest",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "results",
+            "latest"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Result by job_id",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/results/{{job_id}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "results",
+            "{{job_id}}"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Products (filters + pagination)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/products?page={{page}}&page_size={{page_size}}&marca={{marca}}&categoria={{categoria}}&supermarket={{supermarket}}&job_id={{job_id}}&q={{q}}&price_min={{price_min}}&price_max={{price_max}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "products"
+          ],
+          "query": [
+            { "key": "page", "value": "1" },
+            { "key": "page_size", "value": "20" },
+            { "key": "marca", "value": "" },
+            { "key": "categoria", "value": "" },
+            { "key": "supermarket", "value": "" },
+            { "key": "job_id", "value": "" },
+            { "key": "q", "value": "" },
+            { "key": "price_min", "value": "" },
+            { "key": "price_max", "value": "" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Products latest",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/products/latest?page_size={{page_size}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "products",
+            "latest"
+          ],
+          "query": [
+            { "key": "page_size", "value": "20" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Extract (single flyer)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"url\": \"https://example.com/path/to/flyer.pdf\",\n  \"supermercato_nome\": \"Supermercati Deco Arena\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/extract",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "extract"
+          ]
+        },
+        "description": "Requires GEMINI_API_KEY environment variable set on the server."
+      }
+    },
+    {
+      "name": "Extract all flyers",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/extract_all?limit={{limit}}&supermercato_nome={{supermercato_nome}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "extract_all"
+          ],
+          "query": [
+            { "key": "limit", "value": "" },
+            { "key": "supermercato_nome", "value": "Supermercati Deco Arena" }
+          ]
+        },
+        "description": "Requires GEMINI_API_KEY to run extraction."
+      }
+    },
+    {
+      "name": "Static product image (example)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/images/job1759833913_page1_prod2_Passata_verace_card_1759833913.jpg",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "images",
+            "job1759833913_page1_prod2_Passata_verace_card_1759833913.jpg"
+          ]
+        }
+      }
+    }
+  ],
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8003" },
+    { "key": "page", "value": "1" },
+    { "key": "page_size", "value": "20" },
+    { "key": "marca", "value": "" },
+    { "key": "categoria", "value": "" },
+    { "key": "supermarket", "value": "" },
+    { "key": "job_id", "value": "" },
+    { "key": "q", "value": "" },
+    { "key": "price_min", "value": "" },
+    { "key": "price_max", "value": "" }
+  ]
+}
