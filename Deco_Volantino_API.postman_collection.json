@@ -2,7 +2,7 @@
   "info": {
     "name": "Deco Volantino Extractor API",
     "_postman_id": "e4f1a7d4-1234-4aa8-9b1c-collection",
-    "description": "Postman collection for Deco Volantino API: health, flyers, results, products (filters/pagination), and extraction endpoints.",
+    "description": "Postman collection for Deco Volantino API: health, flyers, results, products (filters/pagination), search, and extraction endpoints.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [
@@ -137,6 +137,33 @@
       }
     },
     {
+      "name": "Search products",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/search?q={{q}}&page={{page}}&page_size={{page_size}}&marca={{marca}}&categoria={{categoria}}&supermarket={{supermarket}}&job_id={{job_id}}&price_min={{price_min}}&price_max={{price_max}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "search"
+          ],
+          "query": [
+            { "key": "q", "value": "" },
+            { "key": "page", "value": "1" },
+            { "key": "page_size", "value": "20" },
+            { "key": "marca", "value": "" },
+            { "key": "categoria", "value": "" },
+            { "key": "supermarket", "value": "" },
+            { "key": "job_id", "value": "" },
+            { "key": "price_min", "value": "" },
+            { "key": "price_max", "value": "" }
+          ]
+        }
+      }
+    },
+    {
       "name": "Extract (single flyer)",
       "request": {
         "method": "POST",
@@ -199,7 +226,7 @@
     }
   ],
   "variable": [
-    { "key": "baseUrl", "value": "http://localhost:8003" },
+    { "key": "baseUrl", "value": "http://127.0.0.1:8003" },
     { "key": "page", "value": "1" },
     { "key": "page_size", "value": "20" },
     { "key": "marca", "value": "" },
@@ -208,6 +235,8 @@
     { "key": "job_id", "value": "" },
     { "key": "q", "value": "" },
     { "key": "price_min", "value": "" },
-    { "key": "price_max", "value": "" }
+    { "key": "price_max", "value": "" },
+    { "key": "limit", "value": "" },
+    { "key": "supermercato_nome", "value": "Supermercati Deco Arena" }
   ]
 }

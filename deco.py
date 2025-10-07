@@ -842,6 +842,87 @@ def list_products(page: int = 1, page_size: int = 20, marca: Optional[str] = Non
 def products_latest(page_size: int = 20):
     return list_products(page=1, page_size=page_size)
 
+@app.get("/search")
+def search_products(q: str, page: int = 1, page_size: int = 20, marca: Optional[str] = None, categoria: Optional[str] = None, supermarket: Optional[str] = None, job_id: Optional[str] = None, price_min: Optional[float] = None, price_max: Optional[float] = None):
+    # Ricerca testuale su nome, marca, categoria, descrizione + filtri opzionali.
+    if DB_ENABLED and SessionLocal is not None:
+        from sqlalchemy import or_  # import locale per minimizzare modifiche globali
+        session = SessionLocal()
+        try:
+            query = session.query(Product)
+            query = query.filter(or_(
+                Product.nome.ilike(f"%{q}%"),
+                Product.marca.ilike(f"%{q}%"),
+                Product.categoria.ilike(f"%{q}%"),
+                Product.descrizione.ilike(f"%{q}%")
+            ))
+            if marca:
+                query = query.filter(Product.marca.ilike(f"%{marca}%"))
+            if categoria:
+                query = query.filter(Product.categoria.ilike(f"%{categoria}%"))
+            if supermarket:
+                query = query.filter(Product.supermercato.ilike(f"%{supermarket}%"))
+            if job_id:
+                query = query.filter(Product.job_id == job_id)
+            if price_min is not None:
+                query = query.filter(Product.prezzo_float >= price_min)
+            if price_max is not None:
+                query = query.filter(Product.prezzo_float <= price_max)
+            total = query.count()
+            items = query.order_by(Product.created_at.desc()).offset((page-1)*page_size).limit(page_size).all()
+            products = []
+            for p in items:
+                products.append({
+                    "db_id": p.id,
+                    "job_id": p.job_id,
+                    "nome": p.nome,
+                    "marca": p.marca,
+                    "categoria": p.categoria,
+                    "prezzo": p.prezzo,
+                    "prezzo_float": p.prezzo_float,
+                    "descrizione": p.descrizione,
+                    "pagina": p.pagina,
+                    "supermercato": p.supermercato,
+                    "immagine_prodotto_card": p.immagine_prodotto_card,
+                    "volantino_url": p.volantino_url,
+                    "volantino_name": p.volantino_name,
+                    "volantino_validita": p.volantino_validita,
+                    "created_at": p.created_at.isoformat() if p.created_at else None
+                })
+            return {"page": page, "page_size": page_size, "total": total, "products": products}
+        finally:
+            session.close()
+    else:
+        files = glob.glob(RESULTS_PATTERN)
+        if not files:
+            return {"page": 1, "page_size": 0, "total": 0, "products": []}
+        latest = max(files, key=lambda f: os.path.getmtime(f))
+        with open(latest, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        products = data.get("products", [])
+        def match(p):
+            text_fields = [
+                (p.get("nome", "") or ""),
+                (p.get("marca", "") or ""),
+                (p.get("categoria", "") or ""),
+                (p.get("descrizione", "") or "")
+            ]
+            if not any(q.lower() in tf.lower() for tf in text_fields):
+                return False
+            if marca and marca.lower() not in (p.get("marca","") or "").lower(): return False
+            if categoria and categoria.lower() not in (p.get("categoria","") or "").lower(): return False
+            if supermarket and supermarket.lower() not in (p.get("supermercato","") or "").lower(): return False
+            if job_id and job_id != p.get("job_id"): return False
+            prf = DBManagerSQLAlchemy._convert_price_to_float(p.get("prezzo")) if hasattr(DBManagerSQLAlchemy, "_convert_price_to_float") else 0.0
+            if price_min is not None and prf < price_min: return False
+            if price_max is not None and prf > price_max: return False
+            return True
+        filtered = [p for p in products if match(p)]
+        total = len(filtered)
+        start = (page-1)*page_size
+        end = start + page_size
+        return {"page": page, "page_size": page_size, "total": total, "products": filtered[start:end]}
+
 @app.post("/extract")
 def extract(req: ExtractRequest):
     if not os.getenv('GEMINI_API_KEY'):
