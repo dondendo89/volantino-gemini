@@ -33,6 +33,7 @@ from typing import Optional, List, Dict, Any
 import uvicorn
 import glob
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Text
 from sqlalchemy.orm import sessionmaker, declarative_base
 
@@ -714,6 +715,17 @@ GeminiOnlyExtractor = MultiAIExtractor
 # 5. SERVIZIO API FASTAPI (per deploy su Render)
 # ==============================================================================
 app = FastAPI(title="Deco Volantino Extractor API", version="1.0.0")
+
+# Configurazione CORS per consentire richieste dal sito WordPress
+ALLOW_ORIGINS_ENV = os.getenv("ALLOW_ORIGINS")
+ALLOWED_ORIGINS = [o.strip() for o in ALLOW_ORIGINS_ENV.split(",") if o.strip()] if ALLOW_ORIGINS_ENV else ["http://volantino.local", "http://localhost", "http://localhost:3000"]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 RESULTS_PATTERN = "gemini_results_*.json"
 IMAGES_DIR_ENV = os.getenv("IMAGES_DIR")
