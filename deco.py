@@ -34,7 +34,7 @@ import uvicorn
 import glob
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Text
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Text, func
 from sqlalchemy.orm import sessionmaker, declarative_base
 
 # Configurazione logging
@@ -120,11 +120,44 @@ class DBManagerSimulator:
         if job_id not in self.products:
             self.products[job_id] = []
 
+        def norm(s):
+            if s is None:
+                return ""
+            return str(s).strip().lower()
+
+        saved = []
         for product in products_list:
+            sup = norm(product.get("supermercato"))
+            nome = norm(product.get("nome"))
+
+        
+            # Controllo duplicati: stesso supermercato e stesso nome prodotto
+            exists = False
+            for existing in self.products[job_id]:
+                if norm(existing.get("supermercato")) == sup and norm(existing.get("nome")) == nome:
+                    exists = True
+                    break
+
+            # Controllo anche tra tutti i job (evita duplicati globali quando DB non attivo)
+            if not exists:
+                for other_job, items in self.products.items():
+                    if other_job == job_id:
+                        continue
+                    for existing in items:
+                        if norm(existing.get("supermercato")) == sup and norm(existing.get("nome")) == nome:
+                            exists = True
+                            break
+                    if exists:
+                        break
+
+            if exists:
+                continue
+
             product['db_id'] = len(self.products[job_id]) + 1
             self.products[job_id].append(product)
+            saved.append(product)
 
-        return products_list
+        return saved
 
     def update_job_status(self, job_id, status, progress, total_products, message):
         print(f"📊 Simulazione Aggiornamento Job {job_id}: Stato={status}, Progresso={progress}%, Prodotti={total_products}")
@@ -186,7 +219,24 @@ class DBManagerSQLAlchemy:
         session = self.SessionLocal()
         saved = []
         try:
+            def norm(s):
+                if s is None:
+                    return ""
+                return str(s).strip().lower()
             for p in products_list:
+                sup = norm(p.get("supermercato"))
+                nome = norm(p.get("nome"))
+                marca_norm = norm(p.get("marca"))
+
+                existing = session.query(Product).filter(
+                    func.lower(func.trim(Product.supermercato)) == sup,
+                    func.lower(func.trim(Product.nome)) == nome,
+                ).first()
+
+                if existing:
+                    # Skip duplicate: stesso supermercato e stesso prodotto
+                    continue
+
                 obj = Product(
                     job_id=job_id,
                     nome=p.get("nome"),
