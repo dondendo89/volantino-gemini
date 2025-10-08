@@ -27,7 +27,7 @@ import cv2
 from PIL import Image
 import fitz # PyMuPDF
 from bs4 import BeautifulSoup # NUOVO IMPORT per lo scraping
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 import uvicorn
@@ -63,9 +63,14 @@ Base = None
 DB_ENABLED = False
 engine = None
 if DATABASE_URL:
+    # Rimuove spazi accidentali dall'URL per evitare errori DNS (es. host con spazio finale)
+    DATABASE_URL = DATABASE_URL.strip()
     try:
         # Esempio: postgresql+psycopg2://user:password@host:port/dbname
         engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+        # Testa la connessione in fase di bootstrap per disabilitare il DB in caso di host non risolvibile
+        conn = engine.connect()
+        conn.close()
         SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
         Base = declarative_base()
         DB_ENABLED = True
@@ -723,6 +728,15 @@ class ExtractRequest(BaseModel):
     url: str
     supermercato_nome: Optional[str] = "Supermercati Deco Arena"
 
+# Nuovo modello per importare prodotti via JSON (Postman)
+class ImportRequest(BaseModel):
+    job_id: Optional[str] = None
+    supermercato_nome: Optional[str] = None
+    volantino_url: Optional[str] = None
+    volantino_name: Optional[str] = None
+    volantino_validita: Optional[str] = None
+    products: Optional[List[Dict[str, Any]]] = None
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
@@ -852,6 +866,123 @@ def list_products(page: int = 1, page_size: int = 20, marca: Optional[str] = Non
 def products_latest(page_size: int = 20):
     return list_products(page=1, page_size=page_size)
 
+class CompareItem(BaseModel):
+    nome: str
+    marca: Optional[str] = None
+    qty: Optional[int] = 1
+
+class CompareRequest(BaseModel):
+    items: List[CompareItem]
+
+@app.post("/compare")
+def compare_prices(req: CompareRequest):
+    """Confronta i prodotti del carrello con tutti i volantini e restituisce la migliore offerta per ciascun prodotto."""
+    # Helper per normalizzare stringhe
+    def norm(s: str) -> str:
+        import re
+        return " ".join(re.sub(r"[^a-z0-9]+", " ", (s or "").lower()).split())
+
+    def price_to_float(p):
+        try:
+            return DBManagerSQLAlchemy._convert_price_to_float(p)
+        except Exception:
+            try:
+                import re
+                m = re.search(r"([0-9]+[\.,][0-9]+|[0-9]+)", str(p or ""))
+                if m:
+                    return float(m.group(1).replace(',', '.'))
+            except Exception:
+                pass
+        return 0.0
+
+    # Carica tutti i prodotti disponibili (DB o file locali)
+    products: List[Dict[str, Any]] = []
+    if DB_ENABLED and SessionLocal is not None:
+        session = SessionLocal()
+        try:
+            items = session.query(Product).all()
+            for p in items:
+                products.append({
+                    "db_id": p.id,
+                    "job_id": p.job_id,
+                    "nome": p.nome,
+                    "marca": p.marca,
+                    "categoria": p.categoria,
+                    "prezzo": p.prezzo,
+                    "prezzo_float": p.prezzo_float,
+                    "descrizione": p.descrizione,
+                    "pagina": p.pagina,
+                    "supermercato": p.supermercato,
+                    "immagine_prodotto_card": p.immagine_prodotto_card,
+                    "volantino_url": p.volantino_url,
+                    "volantino_name": p.volantino_name,
+                    "volantino_validita": p.volantino_validita,
+                    "created_at": p.created_at.isoformat() if p.created_at else None
+                })
+        finally:
+            session.close()
+    else:
+        files = glob.glob(RESULTS_PATTERN)
+        for fp in files:
+            try:
+                with open(fp, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                for p in data.get("products", []):
+                    products.append(p)
+            except Exception:
+                continue
+
+    # Indicizza per confronto veloce
+    for p in products:
+        p.setdefault("prezzo_float", price_to_float(p.get("prezzo")))
+        p["_nome_norm"] = norm(p.get("nome", ""))
+        p["_marca_norm"] = norm(p.get("marca", ""))
+
+    results_items = []
+    best_total = 0.0
+
+    for item in req.items:
+        qn = norm(item.nome)
+        qm = norm(item.marca or "")
+        # Trova offerte corrispondenti: match su nome (sottostringa) e, se marca fornita, preferenza matching marca
+        offers = []
+        for p in products:
+            nome_ok = (qn in p["_nome_norm"]) or (p["_nome_norm"] in qn)
+            marca_ok = True
+            if qm:
+                marca_ok = (qm in p["_marca_norm"]) or (p["_marca_norm"] in qm)
+            if nome_ok and marca_ok:
+                offers.append({
+                    "nome": p.get("nome"),
+                    "marca": p.get("marca"),
+                    "supermercato": p.get("supermercato"),
+                    "prezzo": p.get("prezzo"),
+                    "prezzo_float": p.get("prezzo_float", 0.0),
+                    "categoria": p.get("categoria"),
+                    "immagine_prodotto_card": p.get("immagine_prodotto_card"),
+                    "job_id": p.get("job_id"),
+                    "volantino_name": p.get("volantino_name"),
+                    "volantino_validita": p.get("volantino_validita"),
+                })
+        # Ordina per prezzo e seleziona migliore
+        offers = [o for o in offers if (o.get("prezzo_float") or 0.0) > 0.0]
+        offers.sort(key=lambda o: o.get("prezzo_float", 1e9))
+        best = offers[0] if offers else None
+        if best:
+            qty = item.qty or 1
+            best_total += (best.get("prezzo_float") or 0.0) * qty
+        results_items.append({
+            "query": {"nome": item.nome, "marca": item.marca, "qty": item.qty or 1},
+            "best": best,
+            "offers": offers[:20]
+        })
+
+    return {
+        "count": len(req.items),
+        "items": results_items,
+        "best_total": round(best_total, 2)
+    }
+
 @app.get("/search")
 def search_products(q: str, page: int = 1, page_size: int = 20, marca: Optional[str] = None, categoria: Optional[str] = None, supermarket: Optional[str] = None, job_id: Optional[str] = None, price_min: Optional[float] = None, price_max: Optional[float] = None):
     # Ricerca testuale su nome, marca, categoria, descrizione + filtri opzionali.
@@ -949,6 +1080,59 @@ def extract(req: ExtractRequest):
     for product in results:
         product['volantino_url'] = req.url
     return {"job_id": extractor.job_id, "total_products": len(results), "products": results}
+
+# Importazione prodotti via JSON (body raw)
+@app.post("/import")
+def import_products(req: ImportRequest):
+    db_mgr = get_db_manager()
+    if not req.products:
+        raise HTTPException(status_code=400, detail="Il body deve contenere la chiave 'products' con una lista di prodotti.")
+    job_id = req.job_id or f"import_{int(time.time())}"
+    products = req.products
+    for p in products:
+        if req.supermercato_nome and not p.get("supermercato"):
+            p["supermercato"] = req.supermercato_nome
+        if req.volantino_url and not p.get("volantino_url"):
+            p["volantino_url"] = req.volantino_url
+        if req.volantino_name and not p.get("volantino_name"):
+            p["volantino_name"] = req.volantino_name
+        if req.volantino_validita and not p.get("volantino_validita"):
+            p["volantino_validita"] = req.volantino_validita
+    saved = db_mgr.save_products(job_id, products)
+    return {"job_id": job_id, "imported": len(saved), "products": saved}
+
+# Importazione prodotti via JSON (upload file)
+@app.post("/import/file")
+async def import_products_file(
+    file: UploadFile = File(...),
+    job_id: Optional[str] = None,
+    supermercato_nome: Optional[str] = None,
+    volantino_url: Optional[str] = None,
+    volantino_name: Optional[str] = None,
+    volantino_validita: Optional[str] = None,
+):
+    db_mgr = get_db_manager()
+    try:
+        data_bytes = await file.read()
+        data = json.loads(data_bytes)
+    except Exception:
+        raise HTTPException(status_code=400, detail="File JSON non valido o non leggibile.")
+    # Supporta sia un file con chiave 'products' sia una lista diretta di prodotti
+    products = data.get("products") if isinstance(data, dict) else (data if isinstance(data, list) else None)
+    if not products or not isinstance(products, list):
+        raise HTTPException(status_code=400, detail="Il file deve contenere 'products' come lista oppure essere una lista di prodotti.")
+    job = job_id or f"import_{int(time.time())}"
+    for p in products:
+        if supermercato_nome and not p.get("supermercato"):
+            p["supermercato"] = supermercato_nome
+        if volantino_url and not p.get("volantino_url"):
+            p["volantino_url"] = volantino_url
+        if volantino_name and not p.get("volantino_name"):
+            p["volantino_name"] = volantino_name
+        if volantino_validita and not p.get("volantino_validita"):
+            p["volantino_validita"] = volantino_validita
+    saved = db_mgr.save_products(job, products)
+    return {"job_id": job, "imported": len(saved), "products": saved}
 
 @app.get("/extract_all")
 def extract_all(limit: Optional[int] = None, supermercato_nome: Optional[str] = "Supermercati Deco Arena"):

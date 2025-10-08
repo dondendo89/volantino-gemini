@@ -1,0 +1,35 @@
+/* Stili minimi per il frontend del plugin Volantino Gemini */
+#vg-products-app { border: 1px solid #ddd; padding: 16px; border-radius: 8px; }
+#vg-products-app .vg-controls { margin-bottom: 12px; display: flex; align-items: center; }
+#vg-products-app .vg-controls input, #vg-products-app .vg-controls select { padding: 6px 8px; }
+#vg-products-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.vg-card { border: 1px solid #eee; border-radius: 6px; padding: 8px; background: #fff; }
+.vg-card img { max-width: 100%; height: auto; display: block; border-radius: 4px; }
+.vg-card .vg-title { font-weight: 600; margin: 6px 0; }
+.vg-card .vg-meta { font-size: 12px; color: #666; margin-bottom: 4px; }
+.vg-card .vg-price { font-size: 14px; color: #2c7; font-weight: 700; }
+.vg-pagination { display: flex; gap: 8px; align-items: center; margin-top: 12px; }
+
+/* Lista della spesa */
+#vg-shopping { margin-top: 16px; border-top: 1px solid #eee; padding-top: 12px; }
+#vg-shopping h3 { margin: 0 0 8px; }
+.vg-cart-item { display: flex; gap: 8px; align-items: center; border: 1px solid #eee; border-radius: 6px; padding: 8px; background: #fafafa; margin-bottom: 8px; }
+.vg-cart-item img { width: 56px; height: 56px; object-fit: cover; border-radius: 4px; }
+.vg-cart-info { flex: 1; }
+.vg-cart-title { font-weight: 600; }
+.vg-cart-meta { font-size: 12px; color: #666; margin-top: 2px; }
+.vg-cart-actions { display: flex; gap: 6px; align-items: center; margin-top: 6px; }
+#vg-shopping-total { margin-top: 8px; font-weight: 700; }
+.vg-shopping-actions { margin-top: 8px; display: flex; gap: 8px; }
+
+/* Pulsanti nella card */
+.vg-actions { margin-top: 8px; }
+
+/* Confronto prezzi */
+#vg-compare-results { margin-top: 12px; border-top: 1px dashed #ddd; padding-top: 12px; }
+.vg-compare-item { border: 1px solid #eee; border-radius: 6px; padding: 10px; background: #fff; margin-bottom: 10px; }
+.vg-compare-item .vg-compare-query { font-weight: 600; margin-bottom: 6px; }
+.vg-compare-item .vg-compare-best { color: #0a7; font-weight: 700; }
+.vg-compare-item .vg-compare-offers { margin-top: 6px; font-size: 12px; color: #555; }
+.vg-compare-item .vg-compare-offers ul { margin: 4px 0 0; padding-left: 18px; }
+.vg-compare-item .vg-compare-total { margin-top: 8px; font-weight: 700; }
